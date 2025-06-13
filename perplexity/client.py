@@ -210,7 +210,8 @@ class Client:
         }
 
         # Send the query request and handle the response
-        resp = self.session.post('https://www.perplexity.ai/rest/sse/perplexity_ask', json=json_data, stream=True)
+        resp = self.session.post('https://www.perplexity.ai/rest/sse/perplexity_ask', json=json_data, stream=True, timeout=60)
+        print(f"Response object received: {resp}") # Debug print
         chunks = []
 
         def stream_response(resp):
@@ -218,6 +219,7 @@ class Client:
             Generator for streaming responses.
             '''
             for chunk in resp.iter_lines(delimiter=b'\\r\\n\\r\\n'):
+                print(f"Streamed chunk: {chunk}") # Debug print
                 content = chunk.decode('utf-8')
 
                 if content.startswith('event: message\\r\\n'):
@@ -233,7 +235,9 @@ class Client:
         if stream:
             return stream_response(resp)
 
+        print("Entering non-stream mode iteration.") # Debug print
         for chunk in resp.iter_lines(delimiter=b'\\r\\n\\r\\n'):
+            print(f"Non-stream chunk: {chunk}") # Debug print
             content = chunk.decode('utf-8')
 
             if content.startswith('event: message\\r\\n'):
@@ -243,4 +247,6 @@ class Client:
                 chunks.append(content_json)
 
             elif content.startswith('event: end_of_stream\\r\\n'):
-                return chunks[-1]
+                return chunks[-1] if chunks else None
+        print("Exiting non-stream mode iteration.") # Debug print
+        return chunks[-1] if chunks else None
