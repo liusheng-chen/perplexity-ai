@@ -104,6 +104,52 @@ class Client:
 
         return True
 
+    def extract_answer(self, response_data):
+        '''
+        Extract the final answer text from Perplexity response data.
+        '''
+        if not response_data:
+            return None
+
+        # 尝试从不同字段提取答案
+        text_content = response_data.get('text', [])
+
+        if isinstance(text_content, list):
+            # 查找包含答案的步骤
+            for step in text_content:
+                if isinstance(step, dict):
+                    step_type = step.get('step_type')
+                    if step_type in ['ANSWER', 'FINAL_ANSWER', 'RESPONSE']:
+                        content = step.get('content', {})
+                        if isinstance(content, dict) and 'text' in content:
+                            return content['text']
+                        elif isinstance(content, str):
+                            return content
+
+            # 如果没有找到特定的答案步骤，查找最后一个有内容的步骤
+            for step in reversed(text_content):
+                if isinstance(step, dict):
+                    content = step.get('content', {})
+                    if isinstance(content, dict) and 'text' in content:
+                        text = content['text']
+                        if text and len(text.strip()) > 10:  # 过滤掉太短的内容
+                            return text
+                    elif isinstance(content, str) and len(content.strip()) > 10:
+                        return content
+
+        # 如果text是字符串，直接返回
+        elif isinstance(text_content, str):
+            return text_content
+
+        # 尝试其他可能的字段
+        for field in ['answer', 'response', 'result', 'output']:
+            if field in response_data:
+                value = response_data[field]
+                if isinstance(value, str) and value.strip():
+                    return value
+
+        return None
+
     def search(self, query, mode='auto', model=None, sources=['web'], files={}, stream=False, language='en-US', follow_up=None, incognito=False):
         '''
         Executes a search query on Perplexity AI.
@@ -211,42 +257,82 @@ class Client:
 
         # Send the query request and handle the response
         resp = self.session.post('https://www.perplexity.ai/rest/sse/perplexity_ask', json=json_data, stream=True, timeout=60)
-        print(f"Response object received: {resp}") # Debug print
+        # print(f"Response object received: {resp}") # Debug print
         chunks = []
 
         def stream_response(resp):
             '''
             Generator for streaming responses.
             '''
-            for chunk in resp.iter_lines(delimiter=b'\\r\\n\\r\\n'):
-                print(f"Streamed chunk: {chunk}") # Debug print
+            for chunk in resp.iter_lines(delimiter=b'\r\n\r\n'):
+                # print(f"Streamed chunk: {chunk}") # Debug print
                 content = chunk.decode('utf-8')
 
-                if content.startswith('event: message\\r\\n'):
-                    content_json = json.loads(content[len('event: message\\r\\ndata: '):])
+                if content.startswith('event: message\r\n'):
+                    content_json = json.loads(content[len('event: message\r\ndata: '):])
                     content_json['text'] = json.loads(content_json['text'])
 
                     chunks.append(content_json)
                     yield chunks[-1]
 
-                elif content.startswith('event: end_of_stream\\r\\n'):
+                elif content.startswith('event: end_of_stream\r\n'):
                     return
 
         if stream:
             return stream_response(resp)
 
-        print("Entering non-stream mode iteration.") # Debug print
-        for chunk in resp.iter_lines(delimiter=b'\\r\\n\\r\\n'):
-            print(f"Non-stream chunk: {chunk}") # Debug print
+        # print("Entering non-stream mode iteration.") # Debug print
+        final_answer = None
+
+        for chunk in resp.iter_lines(delimiter=b'\r\n\r\n'):
+            # print(f"Non-stream chunk: {chunk}") # Debug print
             content = chunk.decode('utf-8')
 
-            if content.startswith('event: message\\r\\n'):
-                content_json = json.loads(content[len('event: message\\r\\ndata: '):])
-                content_json['text'] = json.loads(content_json['text'])
+            if content.startswith('event: message\r\n'):
+                try:
+                    content_json = json.loads(content[len('event: message\r\ndata: '):])
+                    content_json['text'] = json.loads(content_json['text'])
+                    chunks.append(content_json)
 
-                chunks.append(content_json)
+                    # 检查是否包含最终答案
+                    if content_json.get('text_completed', False) or content_json.get('status') == 'completed':
+                        final_answer = content_json
+                        # print(f"Found final answer: {final_answer.get('text', 'No text field')}")
 
-            elif content.startswith('event: end_of_stream\\r\\n'):
-                return chunks[-1] if chunks else None
-        print("Exiting non-stream mode iteration.") # Debug print
-        return chunks[-1] if chunks else None
+                except json.JSONDecodeError as e:
+                    # print(f"JSON decode error: {e}")
+                    continue
+
+            elif content.startswith('event: end_of_stream\r\n'):
+                # print("End of stream detected.")
+                break
+
+        # print("Exiting non-stream mode iteration.") # Debug print
+
+        # 返回最终答案，如果没有找到则返回最后一个chunk
+        result_data = final_answer if final_answer else (chunks[-1] if chunks else None)
+
+        if result_data:
+            # 尝试提取可读的答案文本
+            extracted_answer = self.extract_answer(result_data)
+            if extracted_answer:
+                # print(f"Extracted answer: {extracted_answer[:200]}...")
+                return {
+                    'answer': extracted_answer,
+                    'raw_data': result_data,
+                    'status': 'success'
+                }
+            else:
+                # print("Could not extract readable answer, returning raw data")
+                return {
+                    'answer': None,
+                    'raw_data': result_data,
+                    'status': 'no_answer_extracted'
+                }
+        else:
+            # print("No chunks received!")
+            return {
+                'answer': None,
+                'raw_data': None,
+                'status': 'no_response'
+            }

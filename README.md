@@ -25,6 +25,32 @@ pip install patchright playwright && patchright install chromium
 
 ## Usage
 
+### OpenAI Compatible API Server (for Cline)
+
+To use this API with Cline or other OpenAI-compatible clients, start the API server:
+
+```bash
+# Install server dependencies
+pip install fastapi uvicorn
+
+# Start the server
+python -m api_server.main
+```
+
+The server will run on `http://localhost:8000` and provide OpenAI-compatible endpoints:
+
+- **Base URL**: `http://localhost:8000/v1`
+- **Endpoint**: `/chat/completions`
+- **Models**: `perplexity-auto`, `perplexity-pro`, `perplexity-reasoning`, `perplexity-research`
+
+#### Cline Configuration:
+1. Set API Provider to "OpenAI Compatible"
+2. Base URL: `http://localhost:8000/v1`
+3. API Key: `dummy-key` (any string works - it will be ignored)
+4. Model: `perplexity-auto` (or other available models)
+
+**Note**: The API server uses hardcoded Perplexity cookies and ignores any API key you provide.
+
 ### Web Interface
 
 The web interface automates account creation and usage in a browser. [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python#best-practices) uses ["Chrome User Data Directory"](https://www.google.com/search?q=chrome+user+data+directory) to be completely undetected, it's ``C:\Users\YourName\AppData\Local\Google\Chrome\User Data`` for Windows, as shown below:
